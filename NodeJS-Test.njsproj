@@ -31,7 +31,7 @@
   <ItemGroup>
     <Content Include="app.js" />
     <Content Include="routes\index.js" />
-    <Content Include="routes\users.js" />
+    <Content Include="routes\messages.js" />
     <Content Include="package.json" />
     <Content Include="public\stylesheets\main.css" />
     <Content Include="README.md" />
