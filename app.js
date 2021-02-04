@@ -9,6 +9,7 @@ var bodyParser = require('body-parser');
 
 var routes = require('./routes/index');
 var users = require('./routes/users');
+var connectionString = 'mongodb://localhost:27017/chatbot';
 
 var app = express();
 
@@ -62,54 +63,75 @@ app.use(function (err, req, res, next) {
 
 app.set('port', process.env.PORT || 3000);
 
-var server = app.listen(app.get('port'), function () {
-    debug('Express server listening on port ' + server.address().port);
-});
 
-var io = require('socket.io')(server);
+const MongoClient = require('mongodb').MongoClient;
+var db = null;
 
-io.on('connection', (socket) => {
-    console.log('a user connected');
-    socket.emit('chat message', 'Hi, what is your first name?');
-    
-    socket.on('disconnect', () => {
-        console.log('user disconnected');
+function reply(socket, message, messagesCollection) {
+
+    socket.emit('chat message', message);
+    messagesCollection.insertOne({ time: new Date(), isBot: 1, message: message });
+}
+
+MongoClient.connect(connectionString, (err, client) => {
+    if (err) return console.error(err)
+    console.log('Connected to Database');
+    db = client.db('chatbot');
+    app.locals.db = db;
+
+    var server = app.listen(app.get('port'), function () {
+        debug('Express server listening on port ' + server.address().port);
     });
-    socket.on('chat message', (msg) => {
-        console.log('message: ' + msg);
 
-        if (!socket.hasOwnProperty('firstName')) {
-            socket.firstName = msg;
-            socket.emit('chat message', 'hi ' + msg + ', when is your birthday? YYYY-MM-DD');
-        } else {
-            if (!socket.hasOwnProperty('birthDay')) {
-                var birthDay = DateTime.fromFormat(msg, 'yyyy-MM-dd');
-                if (birthDay.isValid) {
-                    socket.birthDay = birthDay;
-                    socket.emit('chat message', 'Do you want to know how many days till your next birthday?');
-                } else {
-                    socket.emit('chat message', 'Invalid date, retype your birthday again with YYYY-MM-DD format');
-                }
+    var io = require('socket.io')(server);
+
+    io.on('connection', (socket) => {
+
+        console.log('a user connected');
+        const messagesCollection = db.collection('messages')
+        reply(socket, 'Hi, what is your first name?', messagesCollection);
+    
+        socket.on('disconnect', () => {
+            console.log('user disconnected');
+        });
+        socket.on('chat message', (msg) => {
+
+            console.log('message: ' + msg);
+            messagesCollection.insertOne({ time: new Date(), isBot: 0, message: msg });
+
+            if (!socket.hasOwnProperty('firstName')) {
+                socket.firstName = msg;
+                reply(socket, 'hi ' + msg + ', when is your birthday? YYYY-MM-DD', messagesCollection);
             } else {
-                var yes = ["yes", "yeah", "yup", "sure", "ya"];
-                var no = ["no", "nope", "nah"];
-                if (yes.some(e1 => msg.includes(e1))) {
-                    var nextBirthDay = socket.birthDay;
-                    var now = DateTime.local();
-                    var yearNow = now.year;
-                    nextBirthDay = nextBirthDay.set({ year: yearNow });
-                    var diff = nextBirthDay.diffNow('days').toObject().days;
-                    if (diff < 0) { //if birthday date in this year already passed
-                        nextBirthDay = nextBirthDay.set({ year: yearNow + 1 });
-                        diff = nextBirthDay.diffNow('days').toObject().days;
+                if (!socket.hasOwnProperty('birthDay')) {
+                    var birthDay = DateTime.fromFormat(msg, 'yyyy-MM-dd');
+                    if (birthDay.isValid) {
+                        socket.birthDay = birthDay;
+                        reply(socket, 'Do you want to know how many days till your next birthday?', messagesCollection);
+                    } else {
+                        reply(socket, 'Invalid date, retype your birthday again with YYYY-MM-DD format', messagesCollection);
                     }
-                    socket.emit('chat message', 'There are ' + Math.ceil(diff) + ' days left until your next birthday');
-                } else if (no.some(e1 => msg.includes(e1))) {
-                    socket.emit('chat message', 'Goodbye');
                 } else {
-                    socket.emit('chat message', 'uhh... is that a yes?');
+                    var yes = ["yes", "yeah", "yup", "sure", "ya"];
+                    var no = ["no", "nope", "nah"];
+                    if (yes.some(e1 => msg.includes(e1))) {
+                        var nextBirthDay = socket.birthDay;
+                        var now = DateTime.local();
+                        var yearNow = now.year;
+                        nextBirthDay = nextBirthDay.set({ year: yearNow });
+                        var diff = nextBirthDay.diffNow('days').toObject().days;
+                        if (diff < 0) { //if birthday date in this year already passed
+                            nextBirthDay = nextBirthDay.set({ year: yearNow + 1 });
+                            diff = nextBirthDay.diffNow('days').toObject().days;
+                        }
+                        reply(socket, 'There are ' + Math.ceil(diff) + ' days left until your next birthday', messagesCollection);
+                    } else if (no.some(e1 => msg.includes(e1))) {
+                        reply(socket, 'Goodbye', messagesCollection);
+                    } else {
+                        reply(socket, 'uhh... is that a yes?', messagesCollection);
+                    }
                 }
             }
-        }
+        });
     });
-});
+})
